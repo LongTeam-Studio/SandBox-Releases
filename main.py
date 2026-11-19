@@ -148,6 +148,10 @@ if MULTIPLAYER_AVAILABLE:
 DROPS = []
 MONSTERS = []
 menu_bg = None
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if not os.path.exists(os.path.join(BASE_DIR, "fonts", "NotoSans.ttf")):
+    BASE_DIR = os.getcwd()
+FONT_PATH = os.path.join(BASE_DIR, "fonts", "NotoSans.ttf")
 main_font = None
 small_font = None
 is_day = True
@@ -2247,19 +2251,15 @@ def main():
         pygame.mixer.init()
 
         screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("沙盒游戏 正式版 1.10.7")
+        pygame.display.set_caption("沙盒游戏 正式版 1.11.1")
 
         # 加载字体
-    # 加载字体
-    try:
-        # 优先尝试加载我们自带的 Noto Sans 开源字体
-        main_font = pygame.font.Font("fonts/NotoSansSC-Regular.ttf", 48)
-        small_font = pygame.font.Font("fonts/NotoSansSC-Regular.ttf", 24)
-    except Exception:
-        # 万一字体文件缺失，降级使用默认字体
-        main_font = pygame.font.Font(None, 48)
-        small_font = pygame.font.Font(None, 24)
-
+        try:
+            main_font = pygame.font.Font(FONT_PATH, 48)
+            small_font = pygame.font.Font(FONT_PATH, 24)
+        except Exception:
+            main_font = pygame.font.Font(None, 48)
+            small_font = pygame.font.Font(None, 24)
 
         # 初始化日志
         try:
@@ -2299,7 +2299,6 @@ def main():
         return_to_main_menu(screen)
 
     except KeyboardInterrupt:
-        # 用户主动中断
         if game_logger:
             game_logger.info("用户通过键盘中断退出游戏")
         pygame.quit()
@@ -2307,7 +2306,6 @@ def main():
             game_logger.close()
         sys.exit(0)
     except Exception as e:
-        # 其他致命错误
         if game_logger:
             game_logger.fatal("游戏运行时发生致命错误")
             game_logger.exception("错误详情", e)
