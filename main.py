@@ -20,6 +20,7 @@ from datetime import datetime
 from collections import OrderedDict
 from config import *
 from utils import *
+from audio import *
 
 # 導入網絡模塊（net.network：ASCII 包名，跨平台/打包安全；修复 A 级 ImportError 吞异常）
 try:
@@ -101,81 +102,10 @@ game_logger = None
 
 
 # ---------------------- 音效與音樂 ----------------------
-def init_sounds():
-    global SOUNDS
-    try:
-        if not os.path.exists(TOOL_DIR):
-            os.makedirs(TOOL_DIR, exist_ok=True)
-        
-        # 創建簡單音效
-        SOUNDS["dig"] = pygame.mixer.Sound(buffer=create_sine_wave(440, 0.1, 44100))
-        SOUNDS["place"] = pygame.mixer.Sound(buffer=create_sine_wave(220, 0.1, 44100))
-        SOUNDS["hurt"] = pygame.mixer.Sound(buffer=create_sine_wave(880, 0.1, 44100))
-        SOUNDS["eat"] = pygame.mixer.Sound(buffer=create_eating_sound())
-        
-        for sound in SOUNDS.values():
-            if sound:
-                sound.set_volume(SETTINGS["sound_volume"])
-        pygame.mixer.music.set_volume(SETTINGS["music_volume"])
-    except Exception as e:
-        log(f"音效初始化失敗：{str(e)}")
 
-def create_sine_wave(freq, duration, sample_rate):
-    samples = int(duration * sample_rate)
-    wave = bytearray()
-    for i in range(samples):
-        t = i / sample_rate
-        val = 0.5 * math.sin(2 * math.pi * freq * t)
-        sample = int(val * 32767)
-        wave.extend(sample.to_bytes(2, 'little', signed=True))
-    return bytes(wave)
 
-def create_eating_sound():
-    sample_rate = 44100
-    duration = 0.3
-    samples = int(duration * sample_rate)
-    wave = bytearray()
-    for i in range(samples):
-        t = i / sample_rate
-        freq1 = 300 + 50 * math.sin(2 * math.pi * 5 * t)
-        freq2 = 600 + 100 * math.sin(2 * math.pi * 8 * t)
-        val = 0.3 * math.sin(2 * math.pi * freq1 * t) + 0.2 * math.sin(2 * math.pi * freq2 * t)
-        val *= math.exp(-3 * t)
-        sample = int(val * 32767)
-        wave.extend(sample.to_bytes(2, 'little', signed=True))
-    return bytes(wave)
 
-def play_sound(sound_name):
-    if SOUNDS.get(sound_name):
-        try:
-            SOUNDS[sound_name].play()
-        except Exception as e:
-            log(f"音效播放失敗：{str(e)}")
 
-def play_random_ogg_music(prefix=None):
-    """隨機播放OGG音樂，可指定前綴過濾"""
-    if not os.path.exists(OGG_DIR):
-        if game_logger:
-            game_logger.warning("音樂目錄不存在，跳過播放")
-        return
-    ogg_files = [f for f in os.listdir(OGG_DIR) if f.lower().endswith(".ogg")]
-    if prefix is not None:
-        ogg_files = [f for f in ogg_files if f.lower().startswith(prefix.lower())]
-    if not ogg_files:
-        if game_logger:
-            game_logger.warning(f"無匹配的ogg音樂文件（前綴：{prefix}），跳過播放")
-        return
-    try:
-        random_ogg = random.choice(ogg_files)
-        ogg_path = os.path.join(OGG_DIR, random_ogg)
-        pygame.mixer.music.load(ogg_path)
-        pygame.mixer.music.play()
-        pygame.mixer.music.set_endevent(pygame.USEREVENT + 1)
-        if game_logger:
-            game_logger.info(f"播放音樂：{random_ogg}")
-    except Exception as e:
-        if game_logger:
-            game_logger.error(f"音樂加載失敗：{str(e)}")
 
 # ---------------------- 性能優化函數 ----------------------
 def get_current_fps():
