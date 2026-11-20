@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 修復说明.md
 old_src/
+*.bak

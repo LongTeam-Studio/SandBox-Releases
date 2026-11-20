@@ -1,5 +1,6 @@
 """日志工具：GameLogger + log()。依赖 config.LOG_DIR。"""
 import os
+import time
 import sys
 import traceback
 from datetime import datetime
@@ -98,4 +99,21 @@ def log(content):
             f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {content}\n")
     except Exception as e:
         print(f"日志写入失败: {e}")
+
+
+
+# ---------- FPS 统计 ----------
+frame_count = 0
+last_fps_time = time.time()
+current_fps = 0
+
+def get_current_fps():
+    global frame_count, last_fps_time, current_fps
+    frame_count += 1
+    current_time = time.time()
+    if current_time - last_fps_time >= 1.0:
+        current_fps = frame_count
+        frame_count = 0
+        last_fps_time = current_time
+    return current_fps
 

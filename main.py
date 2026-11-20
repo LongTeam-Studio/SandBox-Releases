@@ -1,3 +1,7 @@
+import sys
+if __name__ == "__main__":
+    sys.modules["main"] = sys.modules["__main__"]
+
 # [file name]: sandbox_game/main.py
 """
 沙盒游戏 正式版 1.10.7（历史版本误标为 1.11.1，本版已据实更正）
