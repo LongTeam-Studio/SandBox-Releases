@@ -1,6 +1,7 @@
 """游戏常量配置。纯数据，不含逻辑。"""
 import os
 import sys
+import random
 
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
@@ -98,3 +99,5 @@ CRAFT_RECIPES = {
 }
 
 # 全局變量
+
+WORLD_SEED = random.randint(0, 2**32 - 1)
