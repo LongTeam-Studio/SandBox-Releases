@@ -1,11 +1,8 @@
-import sys
-if __name__ == "__main__":
-    sys.modules["main"] = sys.modules["__main__"]
 
 # [file name]: sandbox_game/main.py
 """
 沙盒游戏 正式版 1.10.7（历史版本误标为 1.11.1，本版已据实更正）
-作者: LongTeam
+作者: LongTeam-Studio
 整合特性:
 - 1.11.0 的虚拟按钮、工作台、饥饿系统、死亡界面、内置网络管理器
 - 1.10.6rd2 的混合地形生成、出生点安全、日志系统
@@ -13,8 +10,8 @@ if __name__ == "__main__":
 """
 
 import pygame
+import state
 import random
-import sys
 import os
 import json
 import time
@@ -52,33 +49,22 @@ except ImportError as e:
 
 # ---------------------- 全局配置與初始化 ----------------------
 # 方塊類型配置（來自1.11.0，但補充了礦石）
-LOADED_CHUNKS = OrderedDict()
 
 # 把世界参数与分块字典同步给网络模块（修复 A 级：原版 import 后从不 configure，
-# 导致 LOADED_CHUNKS 在网络模块里永远是 None，分块更新静默丢失）。
+# 导致 state.LOADED_CHUNKS 在网络模块里永远是 None，分块更新静默丢失）。
 if MULTIPLAYER_AVAILABLE:
-    net_configure(CHUNK_SIZE, Y_MAX, LOADED_CHUNKS)
-DROPS = []
-MONSTERS = []
-menu_bg = None
+    net_configure(CHUNK_SIZE, Y_MAX, state.LOADED_CHUNKS)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if not os.path.exists(os.path.join(BASE_DIR, "fonts", "NotoSans.ttf")):
     BASE_DIR = os.getcwd()
 FONT_PATH = os.path.join(BASE_DIR, "fonts", "NotoSans.ttf")
-main_font = None
-small_font = None
-is_day = True
-SOUNDS = {"dig": None, "place": None, "hurt": None, "eat": None}
 
 # 性能監控
 frame_skip_counter = 0
 show_fps = True
 
 # 虛擬搖桿狀態
-joystick_active = False
 joystick_pos = (JOYSTICK_RADIUS + 20, SCREEN_HEIGHT - JOYSTICK_RADIUS - 20)
-joystick_handle_pos = joystick_pos
-joystick_vector = (0, 0)
 
 # 虛擬按鈕狀態（1.11.0 完整版）
 button_jump_rect = pygame.Rect(SCREEN_WIDTH - BUTTON_SIZE - 20, SCREEN_HEIGHT - BUTTON_SIZE - 20, BUTTON_SIZE, BUTTON_SIZE)
@@ -89,19 +75,9 @@ button_esc_rect = pygame.Rect(20, 20, BUTTON_SIZE, BUTTON_SIZE)
 button_f5_rect = pygame.Rect(20, 20 + BUTTON_SIZE + 10, BUTTON_SIZE, BUTTON_SIZE)
 
 # 設置選項（增加死亡保留物品欄）
-SETTINGS = {
-    "virtual_joystick": True,
-    "virtual_buttons": True,
-    "sound_volume": 0.7,
-    "music_volume": 0.5,
-    "render_distance": 3,
-    "fps_limit": 60,
-    "keep_inventory_on_death": False,
-}
 
 # ---------------------- 日誌系統（1.10.6rd2 風格） ----------------------
 
-game_logger = None
 
 
 # ---------------------- 音效與音樂 ----------------------
@@ -134,47 +110,46 @@ def draw_virtual_controls(screen):
         
     if VIRTUAL_JOYSTICK_ENABLED:
         pygame.draw.circle(screen, JOYSTICK_BASE_COLOR, joystick_pos, JOYSTICK_RADIUS)
-        pygame.draw.circle(screen, JOYSTICK_HANDLE_COLOR, joystick_handle_pos, JOYSTICK_RADIUS//2)
+        pygame.draw.circle(screen, JOYSTICK_HANDLE_COLOR, state.joystick_handle_pos, JOYSTICK_RADIUS//2)
     
     if VIRTUAL_BUTTONS_ENABLED:
         # 跳跃按钮
         pygame.draw.circle(screen, BUTTON_COLOR, button_jump_rect.center, BUTTON_SIZE//2)
-        jump_text = small_font.render("跳", True, WHITE)
+        jump_text = state.small_font.render("跳", True, WHITE)
         screen.blit(jump_text, (button_jump_rect.centerx - jump_text.get_width()//2, 
                                button_jump_rect.centery - jump_text.get_height()//2))
         
         # 物品栏按钮
         pygame.draw.circle(screen, BUTTON_COLOR, button_inventory_rect.center, BUTTON_SIZE//2)
-        inv_text = small_font.render("包", True, WHITE)
+        inv_text = state.small_font.render("包", True, WHITE)
         screen.blit(inv_text, (button_inventory_rect.centerx - inv_text.get_width()//2, 
                               button_inventory_rect.centery - inv_text.get_height()//2))
         
         # 挖掘按钮
         pygame.draw.circle(screen, BUTTON_COLOR, button_dig_rect.center, BUTTON_SIZE//2)
-        dig_text = small_font.render("挖", True, WHITE)
+        dig_text = state.small_font.render("挖", True, WHITE)
         screen.blit(dig_text, (button_dig_rect.centerx - dig_text.get_width()//2, 
                               button_dig_rect.centery - dig_text.get_height()//2))
         
         # 放置按钮
         pygame.draw.circle(screen, BUTTON_COLOR, button_place_rect.center, BUTTON_SIZE//2)
-        place_text = small_font.render("放", True, WHITE)
+        place_text = state.small_font.render("放", True, WHITE)
         screen.blit(place_text, (button_place_rect.centerx - place_text.get_width()//2, 
                                 button_place_rect.centery - place_text.get_height()//2))
         
         # ESC按钮
         pygame.draw.circle(screen, BUTTON_COLOR, button_esc_rect.center, BUTTON_SIZE//2)
-        esc_text = small_font.render("ESC", True, WHITE)
+        esc_text = state.small_font.render("ESC", True, WHITE)
         screen.blit(esc_text, (button_esc_rect.centerx - esc_text.get_width()//2, 
                               button_esc_rect.centery - esc_text.get_height()//2))
         
         # F5按钮
         pygame.draw.circle(screen, BUTTON_COLOR, button_f5_rect.center, BUTTON_SIZE//2)
-        f5_text = small_font.render("F5", True, WHITE)
+        f5_text = state.small_font.render("F5", True, WHITE)
         screen.blit(f5_text, (button_f5_rect.centerx - f5_text.get_width()//2, 
                              button_f5_rect.centery - f5_text.get_height()//2))
 
 def handle_virtual_controls(event, player, screen):
-    global joystick_active, joystick_handle_pos, joystick_vector
     
     if not VIRTUAL_JOYSTICK_ENABLED and not VIRTUAL_BUTTONS_ENABLED:
         return False
@@ -185,8 +160,8 @@ def handle_virtual_controls(event, player, screen):
         if VIRTUAL_JOYSTICK_ENABLED:
             distance = math.hypot(pos[0] - joystick_pos[0], pos[1] - joystick_pos[1])
             if distance <= JOYSTICK_RADIUS:
-                joystick_active = True
-                joystick_handle_pos = pos
+                state.joystick_active = True
+                state.joystick_handle_pos = pos
                 return True
         
         if VIRTUAL_BUTTONS_ENABLED:
@@ -209,38 +184,38 @@ def handle_virtual_controls(event, player, screen):
                 return_to_main_menu(screen)
                 return True
             elif button_f5_rect.collidepoint(pos):
-                save_data = {"player": player.to_save_data(), "game_state": {"current_map": "平原", "time": "白天" if is_day else "黑夜", "completed_quests": []}}
-                success, msg = create_json_file(get_save_path(player.name), save_data, LOADED_CHUNKS, WORLD_SEED)
+                save_data = {"player": player.to_save_data(), "game_state": {"current_map": "平原", "time": "白天" if state.is_day else "黑夜", "completed_quests": []}}
+                success, msg = create_json_file(get_save_path(player.name), save_data, state.LOADED_CHUNKS, WORLD_SEED)
                 show_tip(screen, msg)
                 return True
     
     elif event.type == pygame.MOUSEMOTION:
-        if joystick_active and VIRTUAL_JOYSTICK_ENABLED:
+        if state.joystick_active and VIRTUAL_JOYSTICK_ENABLED:
             pos = event.pos
             dx = pos[0] - joystick_pos[0]
             dy = pos[1] - joystick_pos[1]
             distance = math.hypot(dx, dy)
             
             if distance <= JOYSTICK_RADIUS:
-                joystick_handle_pos = pos
+                state.joystick_handle_pos = pos
             else:
                 angle = math.atan2(dy, dx)
-                joystick_handle_pos = (
+                state.joystick_handle_pos = (
                     joystick_pos[0] + math.cos(angle) * JOYSTICK_RADIUS,
                     joystick_pos[1] + math.sin(angle) * JOYSTICK_RADIUS
                 )
             
-            joystick_vector = (
-                (joystick_handle_pos[0] - joystick_pos[0]) / JOYSTICK_RADIUS,
-                (joystick_handle_pos[1] - joystick_pos[1]) / JOYSTICK_RADIUS
+            state.joystick_vector = (
+                (state.joystick_handle_pos[0] - joystick_pos[0]) / JOYSTICK_RADIUS,
+                (state.joystick_handle_pos[1] - joystick_pos[1]) / JOYSTICK_RADIUS
             )
             return True
     
     elif event.type == pygame.MOUSEBUTTONUP:
-        if joystick_active:
-            joystick_active = False
-            joystick_handle_pos = joystick_pos
-            joystick_vector = (0, 0)
+        if state.joystick_active:
+            state.joystick_active = False
+            state.joystick_handle_pos = joystick_pos
+            state.joystick_vector = (0, 0)
             return True
     
     return False
@@ -254,8 +229,8 @@ def perform_dig_action(player):
     block_x, block_y, block_z = target_block
     chunk_x, chunk_z = int(block_x//CHUNK_SIZE), int(block_z//CHUNK_SIZE)
     
-    if (chunk_x, chunk_z) in LOADED_CHUNKS:
-        chunk = LOADED_CHUNKS[(chunk_x, chunk_z)]
+    if (chunk_x, chunk_z) in state.LOADED_CHUNKS:
+        chunk = state.LOADED_CHUNKS[(chunk_x, chunk_z)]
         in_x, in_z = int(block_x % CHUNK_SIZE), int(block_z % CHUNK_SIZE)
         if 0 <= in_x < CHUNK_SIZE and 0 <= block_y < Y_MAX and 0 <= in_z < CHUNK_SIZE:
             block_id = chunk.blocks[in_x][block_y][in_z]
@@ -274,7 +249,7 @@ def perform_dig_action(player):
                 play_sound("dig")
                 drop_id = BLOCK_TYPES[block_id]["drop"]
                 if drop_id != 0:
-                    DROPS.append(DropItem(block_x, block_z, drop_id))
+                    state.DROPS.append(DropItem(block_x, block_z, drop_id))
 
 def perform_place_action(player, screen):
     """虚拟放置按钮触发的动作"""
@@ -284,8 +259,8 @@ def perform_place_action(player, screen):
     block_x, block_y, block_z = target_block
     chunk_x, chunk_z = int(block_x//CHUNK_SIZE), int(block_z//CHUNK_SIZE)
     
-    if (chunk_x, chunk_z) in LOADED_CHUNKS:
-        chunk = LOADED_CHUNKS[(chunk_x, chunk_z)]
+    if (chunk_x, chunk_z) in state.LOADED_CHUNKS:
+        chunk = state.LOADED_CHUNKS[(chunk_x, chunk_z)]
         in_x, in_z = int(block_x % CHUNK_SIZE), int(block_z % CHUNK_SIZE)
         if 0 <= in_x < CHUNK_SIZE and 0 <= block_y < Y_MAX and 0 <= in_z < CHUNK_SIZE:
             block_id = chunk.blocks[in_x][block_y][in_z]
@@ -307,8 +282,8 @@ def perform_place_action(player, screen):
         target_block = get_mouse_block(mouse_pos, player)
         block_x, block_y, block_z = target_block
         chunk_x, chunk_z = int(block_x//CHUNK_SIZE), int(block_z//CHUNK_SIZE)
-        if (chunk_x, chunk_z) in LOADED_CHUNKS:
-            chunk = LOADED_CHUNKS[(chunk_x, chunk_z)]
+        if (chunk_x, chunk_z) in state.LOADED_CHUNKS:
+            chunk = state.LOADED_CHUNKS[(chunk_x, chunk_z)]
             in_x, in_z = int(block_x % CHUNK_SIZE), int(block_z % CHUNK_SIZE)
             if 0 <= in_x < CHUNK_SIZE and 0 <= block_y < Y_MAX and 0 <= in_z < CHUNK_SIZE:
                 if chunk.blocks[in_x][block_y][in_z] == 0:
@@ -339,7 +314,7 @@ def draw_infinite_map(screen, loaded_chunks, player):
         if not visible_rect.colliderect(chunk_rect):
             continue
         dist = math.hypot(chunk_x - player.world_x//CHUNK_SIZE, chunk_z - player.world_z//CHUNK_SIZE)
-        alpha = max(50, 255 - int(dist / SETTINGS["render_distance"] * 200))
+        alpha = max(50, 255 - int(dist / state.SETTINGS["render_distance"] * 200))
         
         for x in range(CHUNK_SIZE):
             for z_range in range(CHUNK_SIZE):
@@ -391,7 +366,7 @@ def show_quick_message(screen, message, duration=1000):
     """在屏幕中央快速显示一条消息"""
     message_surface = pygame.Surface((400, 50), pygame.SRCALPHA)
     message_surface.fill((0, 0, 0, 180))
-    message_text = small_font.render(message, True, WHITE)
+    message_text = state.small_font.render(message, True, WHITE)
     text_rect = message_text.get_rect(center=(200, 25))
     message_surface.blit(message_text, text_rect)
     screen_rect = message_surface.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 100))
@@ -404,29 +379,29 @@ def show_quick_message(screen, message, duration=1000):
 
 # ---------------------- 设置管理 ----------------------
 def load_settings():
-    global SETTINGS, VIRTUAL_JOYSTICK_ENABLED, VIRTUAL_BUTTONS_ENABLED, RENDER_DISTANCE, FPS
+    global VIRTUAL_JOYSTICK_ENABLED, VIRTUAL_BUTTONS_ENABLED, RENDER_DISTANCE, FPS
     settings_path = os.path.join(exe_dir, "settings.json")
     if os.path.exists(settings_path):
         try:
             with open(settings_path, "r", encoding="utf-8") as f:
                 loaded_settings = json.load(f)
-                SETTINGS.update(loaded_settings)
+                state.SETTINGS.update(loaded_settings)
         except Exception as e:
             log(f"加载设置失败: {e}")
-    VIRTUAL_JOYSTICK_ENABLED = SETTINGS["virtual_joystick"]
-    VIRTUAL_BUTTONS_ENABLED = SETTINGS["virtual_buttons"]
-    RENDER_DISTANCE = SETTINGS["render_distance"]
-    FPS = SETTINGS["fps_limit"]
-    for sound in SOUNDS.values():
+    VIRTUAL_JOYSTICK_ENABLED = state.SETTINGS["virtual_joystick"]
+    VIRTUAL_BUTTONS_ENABLED = state.SETTINGS["virtual_buttons"]
+    RENDER_DISTANCE = state.SETTINGS["render_distance"]
+    FPS = state.SETTINGS["fps_limit"]
+    for sound in state.SOUNDS.values():
         if sound:
-            sound.set_volume(SETTINGS["sound_volume"])
-    pygame.mixer.music.set_volume(SETTINGS["music_volume"])
+            sound.set_volume(state.SETTINGS["sound_volume"])
+    pygame.mixer.music.set_volume(state.SETTINGS["music_volume"])
 
 def save_settings():
     settings_path = os.path.join(exe_dir, "settings.json")
     try:
         with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(SETTINGS, f, ensure_ascii=False, indent=2)
+            json.dump(state.SETTINGS, f, ensure_ascii=False, indent=2)
         log("设置保存成功")
         return True
     except Exception as e:
@@ -533,10 +508,10 @@ def load_save_list():
 # ---------------------- 死亡界面 ----------------------
 def show_death_screen(screen, player, game_mode, fullscreen):
     screen.fill((50, 0, 0))
-    death_text = main_font.render("你死了!", True, RED)
+    death_text = state.main_font.render("你死了!", True, RED)
     death_rect = death_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//4))
     screen.blit(death_text, death_rect)
-    cause_text = small_font.render("生命值归零", True, WHITE)
+    cause_text = state.small_font.render("生命值归零", True, WHITE)
     cause_rect = cause_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//4 + 60))
     screen.blit(cause_text, cause_rect)
     btn_width, btn_height = 300, 50
@@ -545,14 +520,14 @@ def show_death_screen(screen, player, game_mode, fullscreen):
     menu_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, SCREEN_HEIGHT//2 + btn_height + btn_margin, btn_width, btn_height)
     pygame.draw.rect(screen, GREEN, respawn_btn)
     pygame.draw.rect(screen, BLUE, menu_btn)
-    respawn_text = small_font.render("重新开始", True, BLACK)
-    menu_text = small_font.render("返回主菜单", True, BLACK)
+    respawn_text = state.small_font.render("重新开始", True, BLACK)
+    menu_text = state.small_font.render("返回主菜单", True, BLACK)
     screen.blit(respawn_text, (respawn_btn.x + btn_width//2 - respawn_text.get_width()//2, 
                                respawn_btn.y + btn_height//2 - respawn_text.get_height()//2))
     screen.blit(menu_text, (menu_btn.x + btn_width//2 - menu_text.get_width()//2, 
                             menu_btn.y + btn_height//2 - menu_text.get_height()//2))
-    inventory_setting = "开" if SETTINGS["keep_inventory_on_death"] else "关"
-    setting_text = small_font.render(f"死亡保存物品栏: {inventory_setting}", True, YELLOW)
+    inventory_setting = "开" if state.SETTINGS["keep_inventory_on_death"] else "关"
+    setting_text = state.small_font.render(f"死亡保存物品栏: {inventory_setting}", True, YELLOW)
     screen.blit(setting_text, (SCREEN_WIDTH//2 - setting_text.get_width()//2, SCREEN_HEIGHT - 100))
     pygame.display.flip()
     while True:
@@ -589,44 +564,43 @@ def reset_player(player, keep_inventory=False):
 
 # ---------------------- 界面模块 ----------------------
 def show_main_menu(screen):
-    global menu_bg
-    screen.blit(menu_bg, (0, 0))
-    title_text = main_font.render("沙盒游戏 1.11.1 正式版", True, WHITE)
+    screen.blit(state.menu_bg, (0, 0))
+    title_text = state.main_font.render("沙盒游戏 1.11.1 正式版", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     btn_width, btn_height = 350, 70
     btn_margin = 20
     btn_y_start = SCREEN_HEIGHT//4
     sandbox_btn = pygame.Rect(SCREEN_WIDTH//4 - btn_width//2, btn_y_start, btn_width, btn_height)
-    wzmc_new_btn = pygame.Rect(3*SCREEN_WIDTH//4 - btn_width//2, btn_y_start, btn_width, btn_height)
-    wzmc_load_btn = pygame.Rect(SCREEN_WIDTH//4 - btn_width//2, btn_y_start + btn_height + btn_margin, btn_width, btn_height)
+    sandbox_new_btn = pygame.Rect(3*SCREEN_WIDTH//4 - btn_width//2, btn_y_start, btn_width, btn_height)
+    sandbox_load_btn = pygame.Rect(SCREEN_WIDTH//4 - btn_width//2, btn_y_start + btn_height + btn_margin, btn_width, btn_height)
     multiplayer_btn = pygame.Rect(3*SCREEN_WIDTH//4 - btn_width//2, btn_y_start + btn_height + btn_margin, btn_width, btn_height)
     settings_btn = pygame.Rect(SCREEN_WIDTH//4 - btn_width//2, btn_y_start + 2*(btn_height + btn_margin), btn_width, btn_height)
     controls_btn = pygame.Rect(3*SCREEN_WIDTH//4 - btn_width//2, btn_y_start + 2*(btn_height + btn_margin), btn_width, btn_height)
     about_btn = pygame.Rect(SCREEN_WIDTH//4 - btn_width//2, btn_y_start + 3*(btn_height + btn_margin), btn_width, btn_height)
     quit_btn = pygame.Rect(3*SCREEN_WIDTH//4 - btn_width//2, btn_y_start + 3*(btn_height + btn_margin), btn_width, btn_height)
     pygame.draw.rect(screen, GREEN, sandbox_btn)
-    pygame.draw.rect(screen, BROWN, wzmc_new_btn)
-    pygame.draw.rect(screen, BLUE, wzmc_load_btn)
+    pygame.draw.rect(screen, BROWN, sandbox_new_btn)
+    pygame.draw.rect(screen, BLUE, sandbox_load_btn)
     pygame.draw.rect(screen, PURPLE, multiplayer_btn)
     pygame.draw.rect(screen, ORANGE, settings_btn)
     pygame.draw.rect(screen, (100, 100, 255), controls_btn)
     pygame.draw.rect(screen, (200, 100, 200), about_btn)
     pygame.draw.rect(screen, RED, quit_btn)
-    screen.blit(small_font.render("沙盒模式", True, BLACK), (sandbox_btn.x + btn_width//2 - 40, sandbox_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("新游戏", True, BLACK), (wzmc_new_btn.x + btn_width//2 - 30, wzmc_new_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("加载存档", True, BLACK), (wzmc_load_btn.x + btn_width//2 - 40, wzmc_load_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("多人联机", True, BLACK), (multiplayer_btn.x + btn_width//2 - 40, multiplayer_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("游戏设置", True, BLACK), (settings_btn.x + btn_width//2 - 40, settings_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("控制设置", True, BLACK), (controls_btn.x + btn_width//2 - 40, controls_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("关于游戏", True, BLACK), (about_btn.x + btn_width//2 - 40, about_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("退出游戏", True, BLACK), (quit_btn.x + btn_width//2 - 40, quit_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("沙盒模式", True, BLACK), (sandbox_btn.x + btn_width//2 - 40, sandbox_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("新游戏", True, BLACK), (sandbox_new_btn.x + btn_width//2 - 30, sandbox_new_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("加载存档", True, BLACK), (sandbox_load_btn.x + btn_width//2 - 40, sandbox_load_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("多人联机", True, BLACK), (multiplayer_btn.x + btn_width//2 - 40, multiplayer_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("游戏设置", True, BLACK), (settings_btn.x + btn_width//2 - 40, settings_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("控制设置", True, BLACK), (controls_btn.x + btn_width//2 - 40, controls_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("关于游戏", True, BLACK), (about_btn.x + btn_width//2 - 40, about_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("退出游戏", True, BLACK), (quit_btn.x + btn_width//2 - 40, quit_btn.y + btn_height//2 - 10))
     pygame.display.flip()
-    return (sandbox_btn, wzmc_new_btn, wzmc_load_btn, multiplayer_btn, settings_btn, controls_btn, about_btn, quit_btn)
+    return (sandbox_btn, sandbox_new_btn, sandbox_load_btn, multiplayer_btn, settings_btn, controls_btn, about_btn, quit_btn)
 
 def show_multiplayer_menu(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("多人联机", True, WHITE)
+    title_text = state.main_font.render("多人联机", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     btn_width, btn_height = 400, 50
@@ -638,20 +612,20 @@ def show_multiplayer_menu(screen):
     pygame.draw.rect(screen, GREEN, host_btn)
     pygame.draw.rect(screen, BLUE, join_btn)
     pygame.draw.rect(screen, GRAY, back_btn)
-    screen.blit(small_font.render("创建服务器", True, BLACK), (host_btn.x + 20, host_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("加入服务器", True, BLACK), (join_btn.x + 20, join_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("返回主菜单", True, BLACK), (back_btn.x + 20, back_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("创建服务器", True, BLACK), (host_btn.x + 20, host_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("加入服务器", True, BLACK), (join_btn.x + 20, join_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("返回主菜单", True, BLACK), (back_btn.x + 20, back_btn.y + btn_height//2 - 10))
     pygame.display.flip()
     return host_btn, join_btn, back_btn
 
 def show_join_server_menu(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("加入服务器", True, WHITE)
+    title_text = state.main_font.render("加入服务器", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     input_width, input_height = 400, 50
     input_y_start = SCREEN_HEIGHT//4
-    ip_label = small_font.render("服务器地址 (IP:端口):", True, WHITE)
+    ip_label = state.small_font.render("服务器地址 (IP:端口):", True, WHITE)
     screen.blit(ip_label, (SCREEN_WIDTH//2 - input_width//2, input_y_start - 30))
     ip_input_rect = pygame.Rect(SCREEN_WIDTH//2 - input_width//2, input_y_start, input_width, input_height)
     pygame.draw.rect(screen, WHITE, ip_input_rect, 2)
@@ -664,59 +638,59 @@ def show_join_server_menu(screen):
     back_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + btn_height + btn_margin, btn_width, btn_height)
     pygame.draw.rect(screen, GREEN, connect_btn)
     pygame.draw.rect(screen, GRAY, back_btn)
-    screen.blit(small_font.render("连接服务器", True, BLACK), (connect_btn.x + 50, connect_btn.y + btn_height//2 - 10))
-    screen.blit(small_font.render("返回", True, BLACK), (back_btn.x + 70, back_btn.y + btn_height//2 - 10))
-    text_surface = small_font.render(ip_text, True, WHITE)
+    screen.blit(state.small_font.render("连接服务器", True, BLACK), (connect_btn.x + 50, connect_btn.y + btn_height//2 - 10))
+    screen.blit(state.small_font.render("返回", True, BLACK), (back_btn.x + 70, back_btn.y + btn_height//2 - 10))
+    text_surface = state.small_font.render(ip_text, True, WHITE)
     screen.blit(text_surface, (ip_input_rect.x + 10, ip_input_rect.y + input_height//2 - 10))
     pygame.display.flip()
     return ip_input_rect, connect_btn, back_btn, default_ip
 
 def show_settings_menu(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("游戏设置", True, WHITE)
+    title_text = state.main_font.render("游戏设置", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     btn_width, btn_height = 400, 50
     btn_margin = 15
     btn_y_start = SCREEN_HEIGHT//4
     joystick_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start, btn_width, btn_height)
-    pygame.draw.rect(screen, GREEN if SETTINGS["virtual_joystick"] else RED, joystick_btn)
-    joystick_text = small_font.render(f"虚拟摇杆: {'开' if SETTINGS['virtual_joystick'] else '关'}", True, BLACK)
+    pygame.draw.rect(screen, GREEN if state.SETTINGS["virtual_joystick"] else RED, joystick_btn)
+    joystick_text = state.small_font.render(f"虚拟摇杆: {'开' if state.SETTINGS['virtual_joystick'] else '关'}", True, BLACK)
     screen.blit(joystick_text, (joystick_btn.x + 20, joystick_btn.y + btn_height//2 - 10))
     buttons_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + btn_height + btn_margin, btn_width, btn_height)
-    pygame.draw.rect(screen, GREEN if SETTINGS["virtual_buttons"] else RED, buttons_btn)
-    buttons_text = small_font.render(f"虚拟按钮: {'开' if SETTINGS['virtual_buttons'] else '关'}", True, BLACK)
+    pygame.draw.rect(screen, GREEN if state.SETTINGS["virtual_buttons"] else RED, buttons_btn)
+    buttons_text = state.small_font.render(f"虚拟按钮: {'开' if state.SETTINGS['virtual_buttons'] else '关'}", True, BLACK)
     screen.blit(buttons_text, (buttons_btn.x + 20, buttons_btn.y + btn_height//2 - 10))
     inventory_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + 2*(btn_height + btn_margin), btn_width, btn_height)
-    pygame.draw.rect(screen, GREEN if SETTINGS["keep_inventory_on_death"] else RED, inventory_btn)
-    inventory_text = small_font.render(f"死亡保存物品栏: {'开' if SETTINGS['keep_inventory_on_death'] else '关'}", True, BLACK)
+    pygame.draw.rect(screen, GREEN if state.SETTINGS["keep_inventory_on_death"] else RED, inventory_btn)
+    inventory_text = state.small_font.render(f"死亡保存物品栏: {'开' if state.SETTINGS['keep_inventory_on_death'] else '关'}", True, BLACK)
     screen.blit(inventory_text, (inventory_btn.x + 20, inventory_btn.y + btn_height//2 - 10))
     sound_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + 3*(btn_height + btn_margin), btn_width, btn_height)
     pygame.draw.rect(screen, BLUE, sound_btn)
-    sound_text = small_font.render(f"声音音量: {int(SETTINGS['sound_volume'] * 100)}%", True, BLACK)
+    sound_text = state.small_font.render(f"声音音量: {int(state.SETTINGS['sound_volume'] * 100)}%", True, BLACK)
     screen.blit(sound_text, (sound_btn.x + 20, sound_btn.y + btn_height//2 - 10))
     music_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + 4*(btn_height + btn_margin), btn_width, btn_height)
     pygame.draw.rect(screen, BLUE, music_btn)
-    music_text = small_font.render(f"音乐音量: {int(SETTINGS['music_volume'] * 100)}%", True, BLACK)
+    music_text = state.small_font.render(f"音乐音量: {int(state.SETTINGS['music_volume'] * 100)}%", True, BLACK)
     screen.blit(music_text, (music_btn.x + 20, music_btn.y + btn_height//2 - 10))
     render_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + 5*(btn_height + btn_margin), btn_width, btn_height)
     pygame.draw.rect(screen, ORANGE, render_btn)
-    render_text = small_font.render(f"渲染距离: {SETTINGS['render_distance']}", True, BLACK)
+    render_text = state.small_font.render(f"渲染距离: {state.SETTINGS['render_distance']}", True, BLACK)
     screen.blit(render_text, (render_btn.x + 20, render_btn.y + btn_height//2 - 10))
     fps_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + 6*(btn_height + btn_margin), btn_width, btn_height)
     pygame.draw.rect(screen, ORANGE, fps_btn)
-    fps_text = small_font.render(f"FPS限制: {SETTINGS['fps_limit']}", True, BLACK)
+    fps_text = state.small_font.render(f"FPS限制: {state.SETTINGS['fps_limit']}", True, BLACK)
     screen.blit(fps_text, (fps_btn.x + 20, fps_btn.y + btn_height//2 - 10))
     back_btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y_start + 7*(btn_height + btn_margin), btn_width, btn_height)
     pygame.draw.rect(screen, GRAY, back_btn)
-    back_text = small_font.render("返回主菜单", True, BLACK)
+    back_text = state.small_font.render("返回主菜单", True, BLACK)
     screen.blit(back_text, (back_btn.x + btn_width//2 - 40, back_btn.y + btn_height//2 - 10))
     pygame.display.flip()
     return (joystick_btn, buttons_btn, inventory_btn, sound_btn, music_btn, render_btn, fps_btn, back_btn)
 
 def show_save_list(screen, scroll_offset, btn_spacing, visible_btn_count):
     screen.fill(BLACK)
-    title_text = main_font.render("选择wzmc存档", True, WHITE)
+    title_text = state.main_font.render("选择沙盒存档", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     saves = load_save_list()
@@ -729,7 +703,7 @@ def show_save_list(screen, scroll_offset, btn_spacing, visible_btn_count):
             continue
         btn = pygame.Rect(SCREEN_WIDTH//2 - btn_width//2, btn_y, btn_width, btn_height)
         pygame.draw.rect(screen, ORANGE, btn)
-        screen.blit(small_font.render(f"存档 {i+1}: {save_name}", True, BLACK), (btn.x + 20, btn.y + 12))
+        screen.blit(state.small_font.render(f"存档 {i+1}: {save_name}", True, BLACK), (btn.x + 20, btn.y + 12))
         btn_list.append((btn, save_name))
     back_btn = pygame.Rect(SCREEN_WIDTH//4 - 100, SCREEN_HEIGHT - 110, 200, 50)
     delete_btn = pygame.Rect(SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 110, 200, 50)
@@ -737,18 +711,18 @@ def show_save_list(screen, scroll_offset, btn_spacing, visible_btn_count):
     pygame.draw.rect(screen, GRAY, back_btn)
     pygame.draw.rect(screen, RED, delete_btn)
     pygame.draw.rect(screen, YELLOW, import_btn)
-    screen.blit(small_font.render("返回主菜单", True, BLACK), (back_btn.x + 40, back_btn.y + 12))
-    screen.blit(small_font.render("删除选中存档", True, BLACK), (delete_btn.x + 30, delete_btn.y + 12))
-    screen.blit(small_font.render("导入.sbx存档", True, BLACK), (import_btn.x + 30, import_btn.y + 12))
+    screen.blit(state.small_font.render("返回主菜单", True, BLACK), (back_btn.x + 40, back_btn.y + 12))
+    screen.blit(state.small_font.render("删除选中存档", True, BLACK), (delete_btn.x + 30, delete_btn.y + 12))
+    screen.blit(state.small_font.render("导入.sbx存档", True, BLACK), (import_btn.x + 30, import_btn.y + 12))
     if len(saves) > visible_btn_count:
-        scroll_tip = small_font.render("鼠标滚轮滚动查看更多", True, GRAY)
+        scroll_tip = state.small_font.render("鼠标滚轮滚动查看更多", True, GRAY)
         screen.blit(scroll_tip, (SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 30))
     pygame.display.flip()
     return btn_list, back_btn, delete_btn, import_btn, saves
 
 def show_controls_info(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("控制说明", True, WHITE)
+    title_text = state.main_font.render("控制说明", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     controls = [
@@ -760,12 +734,12 @@ def show_controls_info(screen):
     ]
     y_pos = SCREEN_HEIGHT//4
     for control in controls:
-        text = small_font.render(control, True, WHITE)
+        text = state.small_font.render(control, True, WHITE)
         screen.blit(text, (SCREEN_WIDTH//2 - 200, y_pos))
         y_pos += 30
     back_btn = pygame.Rect(SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 100, 200, 50)
     pygame.draw.rect(screen, GRAY, back_btn)
-    back_text = small_font.render("返回主菜单", True, BLACK)
+    back_text = state.small_font.render("返回主菜单", True, BLACK)
     screen.blit(back_text, (back_btn.x + 50, back_btn.y + 15))
     pygame.display.flip()
     waiting = True
@@ -780,7 +754,7 @@ def show_controls_info(screen):
 
 def show_about_screen(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("关于游戏", True, WHITE)
+    title_text = state.main_font.render("关于游戏", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     about_info = [
@@ -796,17 +770,17 @@ def show_about_screen(screen):
         "- 完整的虚拟按钮支持",
         "- 死亡界面及物品栏保留设置",
         "",
-        "开发者: long",
+        "开发者: LongTeam-Studio",
         "QQ群: 131293550"
     ]
     y_pos = SCREEN_HEIGHT//4
     for info in about_info:
-        text = small_font.render(info, True, WHITE)
+        text = state.small_font.render(info, True, WHITE)
         screen.blit(text, (SCREEN_WIDTH//2 - 200, y_pos))
         y_pos += 30
     back_btn = pygame.Rect(SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT - 100, 200, 50)
     pygame.draw.rect(screen, GRAY, back_btn)
-    back_text = small_font.render("返回主菜单", True, BLACK)
+    back_text = state.small_font.render("返回主菜单", True, BLACK)
     screen.blit(back_text, (back_btn.x + 50, back_btn.y + 15))
     pygame.display.flip()
     waiting = True
@@ -821,7 +795,7 @@ def show_about_screen(screen):
 
 def show_tip(screen, tip_text, duration=1500):
     screen.fill(BLACK)
-    text_surf = small_font.render(tip_text, True, WHITE)
+    text_surf = state.small_font.render(tip_text, True, WHITE)
     text_rect = text_surf.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
     screen.blit(text_surf, text_rect)
     pygame.display.flip()
@@ -833,9 +807,9 @@ def find_safe_spawn_location():
         spawn_z = random.randint(-10, 10)
         chunk_x = int(spawn_x // CHUNK_SIZE)
         chunk_z = int(spawn_z // CHUNK_SIZE)
-        if (chunk_x, chunk_z) not in LOADED_CHUNKS:
-            LOADED_CHUNKS[(chunk_x, chunk_z)] = Chunk(chunk_x, chunk_z, WORLD_SEED)
-        chunk = LOADED_CHUNKS[(chunk_x, chunk_z)]
+        if (chunk_x, chunk_z) not in state.LOADED_CHUNKS:
+            state.LOADED_CHUNKS[(chunk_x, chunk_z)] = Chunk(chunk_x, chunk_z, WORLD_SEED)
+        chunk = state.LOADED_CHUNKS[(chunk_x, chunk_z)]
         in_x = int(spawn_x % CHUNK_SIZE)
         in_z = int(spawn_z % CHUNK_SIZE)
         safe_y = None
@@ -862,36 +836,36 @@ def load_chunks_around_player(player):
             target_chunk_x = player_chunk_x + dx
             target_chunk_z = player_chunk_z + dz
             chunks_to_keep.add((target_chunk_x, target_chunk_z))
-            if (target_chunk_x, target_chunk_z) not in LOADED_CHUNKS:
-                LOADED_CHUNKS[(target_chunk_x, target_chunk_z)] = Chunk(target_chunk_x, target_chunk_z, WORLD_SEED)
+            if (target_chunk_x, target_chunk_z) not in state.LOADED_CHUNKS:
+                state.LOADED_CHUNKS[(target_chunk_x, target_chunk_z)] = Chunk(target_chunk_x, target_chunk_z, WORLD_SEED)
     chunks_to_remove = []
-    for chunk_key in LOADED_CHUNKS:
+    for chunk_key in state.LOADED_CHUNKS:
         if chunk_key not in chunks_to_keep:
             chunks_to_remove.append(chunk_key)
     for chunk_key in chunks_to_remove:
-        del LOADED_CHUNKS[chunk_key]
+        del state.LOADED_CHUNKS[chunk_key]
 
 def show_player_name_input(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("wzmc新游戏 - 输入玩家名称", True, WHITE)
+    title_text = state.main_font.render("沙盒新游戏 - 输入玩家名称", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//4))
     screen.blit(title_text, title_rect)
-    tip_text1 = small_font.render("请在命令行输入玩家名称（回车用默认名）", True, YELLOW)
+    tip_text1 = state.small_font.render("请在命令行输入玩家名称（回车用默认名）", True, YELLOW)
     tip_rect1 = tip_text1.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 30))
     default_name = f"Player_{int(time.time())}"
-    tip_text2 = small_font.render(f"默认名称: {default_name}", True, WHITE)
+    tip_text2 = state.small_font.render(f"默认名称: {default_name}", True, WHITE)
     tip_rect2 = tip_text2.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 20))
     screen.blit(tip_text1, tip_rect1)
     screen.blit(tip_text2, tip_rect2)
     confirm_btn = pygame.Rect(SCREEN_WIDTH//2 - 120, SCREEN_HEIGHT//2 + 80, 240, 50)
     pygame.draw.rect(screen, GREEN, confirm_btn)
-    screen.blit(small_font.render("命令行输入后点击确认", True, BLACK), (confirm_btn.x + 10, confirm_btn.y + 12))
+    screen.blit(state.small_font.render("命令行输入后点击确认", True, BLACK), (confirm_btn.x + 10, confirm_btn.y + 12))
     pygame.display.flip()
     return confirm_btn, default_name
 
 def show_resolution_select(screen):
     screen.fill(BLACK)
-    title_text = main_font.render("选择分辨率", True, WHITE)
+    title_text = state.main_font.render("选择分辨率", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//8))
     screen.blit(title_text, title_rect)
     res1_btn = pygame.Rect(SCREEN_WIDTH//2 - 120, SCREEN_HEIGHT//2 - 50, 240, 50)
@@ -900,9 +874,9 @@ def show_resolution_select(screen):
     pygame.draw.rect(screen, GREEN, res1_btn)
     pygame.draw.rect(screen, GREEN, res2_btn)
     pygame.draw.rect(screen, YELLOW, fullscreen_btn)
-    screen.blit(small_font.render("1. 800×600（默认）", True, BLACK), (res1_btn.x + 40, res1_btn.y + 12))
-    screen.blit(small_font.render("2. 1024×768", True, BLACK), (res2_btn.x + 60, res2_btn.y + 12))
-    screen.blit(small_font.render("3. 全屏模式（F11切换）", True, BLACK), (fullscreen_btn.x + 20, fullscreen_btn.y + 12))
+    screen.blit(state.small_font.render("1. 800×600（默认）", True, BLACK), (res1_btn.x + 40, res1_btn.y + 12))
+    screen.blit(state.small_font.render("2. 1024×768", True, BLACK), (res2_btn.x + 60, res2_btn.y + 12))
+    screen.blit(state.small_font.render("3. 全屏模式（F11切换）", True, BLACK), (fullscreen_btn.x + 20, fullscreen_btn.y + 12))
     pygame.display.flip()
     return res1_btn, res2_btn, fullscreen_btn
 
@@ -919,35 +893,35 @@ def show_settings_screen(screen):
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = event.pos
                 if joystick_btn.collidepoint(mx, my):
-                    SETTINGS["virtual_joystick"] = not SETTINGS["virtual_joystick"]
+                    state.SETTINGS["virtual_joystick"] = not state.SETTINGS["virtual_joystick"]
                     save_settings()
                     load_settings()
                 elif buttons_btn.collidepoint(mx, my):
-                    SETTINGS["virtual_buttons"] = not SETTINGS["virtual_buttons"]
+                    state.SETTINGS["virtual_buttons"] = not state.SETTINGS["virtual_buttons"]
                     save_settings()
                     load_settings()
                 elif inventory_btn.collidepoint(mx, my):
-                    SETTINGS["keep_inventory_on_death"] = not SETTINGS["keep_inventory_on_death"]
+                    state.SETTINGS["keep_inventory_on_death"] = not state.SETTINGS["keep_inventory_on_death"]
                     save_settings()
                     load_settings()
                 elif sound_btn.collidepoint(mx, my):
-                    SETTINGS["sound_volume"] = (SETTINGS["sound_volume"] + 0.1) % 1.1
-                    if SETTINGS["sound_volume"] > 1.0:
-                        SETTINGS["sound_volume"] = 0.0
+                    state.SETTINGS["sound_volume"] = (state.SETTINGS["sound_volume"] + 0.1) % 1.1
+                    if state.SETTINGS["sound_volume"] > 1.0:
+                        state.SETTINGS["sound_volume"] = 0.0
                     save_settings()
                     load_settings()
                 elif music_btn.collidepoint(mx, my):
-                    SETTINGS["music_volume"] = (SETTINGS["music_volume"] + 0.1) % 1.1
-                    if SETTINGS["music_volume"] > 1.0:
-                        SETTINGS["music_volume"] = 0.0
+                    state.SETTINGS["music_volume"] = (state.SETTINGS["music_volume"] + 0.1) % 1.1
+                    if state.SETTINGS["music_volume"] > 1.0:
+                        state.SETTINGS["music_volume"] = 0.0
                     save_settings()
                     load_settings()
                 elif render_btn.collidepoint(mx, my):
-                    SETTINGS["render_distance"] = (SETTINGS["render_distance"] % 5) + 1
+                    state.SETTINGS["render_distance"] = (state.SETTINGS["render_distance"] % 5) + 1
                     save_settings()
                     load_settings()
                 elif fps_btn.collidepoint(mx, my):
-                    SETTINGS["fps_limit"] = 60 if SETTINGS["fps_limit"] == 120 else 120
+                    state.SETTINGS["fps_limit"] = 60 if state.SETTINGS["fps_limit"] == 120 else 120
                     save_settings()
                     load_settings()
                 elif back_btn.collidepoint(mx, my):
@@ -955,11 +929,11 @@ def show_settings_screen(screen):
 
 # ---------------------- 游戏主循环 ----------------------
 def return_to_main_menu(screen):
-    global LOADED_CHUNKS, WORLD_SEED, DROPS, MONSTERS, IS_SERVER, IS_CLIENT, PLAYERS
-    LOADED_CHUNKS = OrderedDict()
+    global WORLD_SEED, IS_SERVER, IS_CLIENT, PLAYERS
+    state.LOADED_CHUNKS = OrderedDict()
     WORLD_SEED = random.randint(0, 2**32 - 1)
-    DROPS = []
-    MONSTERS = []
+    state.DROPS = []
+    state.MONSTERS = []
     PLAYERS.clear()
     if IS_CLIENT:
         net_manager.connected = False
@@ -983,7 +957,7 @@ def return_to_main_menu(screen):
 
     while True:
         buttons = show_main_menu(screen)
-        (sandbox_btn, wzmc_new_btn, wzmc_load_btn, multiplayer_btn, settings_btn, 
+        (sandbox_btn, sandbox_new_btn, sandbox_load_btn, multiplayer_btn, settings_btn, 
          controls_btn, about_btn, quit_btn) = buttons
 
         for event in pygame.event.get():
@@ -1001,7 +975,7 @@ def return_to_main_menu(screen):
                     load_chunks_around_player(player)
                     game_mode = "sandbox"
                     start_game_loop(screen, player, game_mode, fullscreen)
-                elif wzmc_new_btn.collidepoint(mx, my):
+                elif sandbox_new_btn.collidepoint(mx, my):
                     confirm_btn, default_name = show_player_name_input(screen)
                     name_confirmed = False
                     while not name_confirmed:
@@ -1025,17 +999,17 @@ def return_to_main_menu(screen):
                                     load_chunks_around_player(player)
                                     save_data = {
                                         "player": player.to_save_data(),
-                                        "game_state": {"current_map": "平原", "time": "白天" if is_day else "黑夜", "completed_quests": []}
+                                        "game_state": {"current_map": "平原", "time": "白天" if state.is_day else "黑夜", "completed_quests": []}
                                     }
-                                    success, msg = create_json_file(get_save_path(final_name), save_data, LOADED_CHUNKS, WORLD_SEED)
+                                    success, msg = create_json_file(get_save_path(final_name), save_data, state.LOADED_CHUNKS, WORLD_SEED)
                                     show_tip(screen, msg)
-                                    game_mode = "wzmc"
+                                    game_mode = "sandbox"
                                     name_confirmed = True
                                     start_game_loop(screen, player, game_mode, fullscreen)
-                elif wzmc_load_btn.collidepoint(mx, my):
+                elif sandbox_load_btn.collidepoint(mx, my):
                     saves = load_save_list()
                     if not saves:
-                        show_tip(screen, "无wzmc存档，返回主菜单")
+                        show_tip(screen, "无沙盒存档，返回主菜单")
                         continue
                     max_scroll = max(0, (len(saves) - visible_btn_count) * (btn_spacing + 10))
                     selected_save = None
@@ -1081,10 +1055,10 @@ def return_to_main_menu(screen):
                     if selected_save not in ("back", None):
                         success, msg, player_data, loaded_chunks, world_seed = load_json_file(get_save_path(selected_save))
                         if success:
-                            LOADED_CHUNKS = loaded_chunks
+                            state.LOADED_CHUNKS = loaded_chunks
                             WORLD_SEED = world_seed
                             player = Player.from_save_data(player_data)
-                            game_mode = "wzmc"
+                            game_mode = "sandbox"
                             show_tip(screen, "加载成功")
                             start_game_loop(screen, player, game_mode, fullscreen)
                         else:
@@ -1160,7 +1134,7 @@ def return_to_main_menu(screen):
                     sys.exit(0)
 
 def start_game_loop(screen, player, game_mode, fullscreen):
-    global LOADED_CHUNKS, WORLD_SEED, DROPS, MONSTERS, is_day, PLAYERS
+    global WORLD_SEED, PLAYERS
     selected_block = 2
     current_dig_block = None
     current_dig_progress = 0
@@ -1186,7 +1160,7 @@ def start_game_loop(screen, player, game_mode, fullscreen):
         if player.hp <= 0:
             result = show_death_screen(screen, player, game_mode, fullscreen)
             if result == "respawn":
-                keep_inventory = SETTINGS["keep_inventory_on_death"]
+                keep_inventory = state.SETTINGS["keep_inventory_on_death"]
                 player = reset_player(player, keep_inventory)
                 load_chunks_around_player(player)
                 continue
@@ -1211,8 +1185,8 @@ def start_game_loop(screen, player, game_mode, fullscreen):
                     player.bag_open = not player.bag_open
                     player.workbench_open = False
                 elif event.key == pygame.K_F5:
-                    save_data = {"player": player.to_save_data(), "game_state": {"current_map": "平原", "time": "白天" if is_day else "黑夜", "completed_quests": []}}
-                    success, msg = create_json_file(get_save_path(player.name), save_data, LOADED_CHUNKS, WORLD_SEED)
+                    save_data = {"player": player.to_save_data(), "game_state": {"current_map": "平原", "time": "白天" if state.is_day else "黑夜", "completed_quests": []}}
+                    success, msg = create_json_file(get_save_path(player.name), save_data, state.LOADED_CHUNKS, WORLD_SEED)
                     show_tip(screen, msg)
             elif event.type == pygame.USEREVENT + 1:
                 play_random_ogg_music()
@@ -1227,8 +1201,8 @@ def start_game_loop(screen, player, game_mode, fullscreen):
                     target_block = get_mouse_block(mouse_pos, player)
                     block_x, block_y, block_z = target_block
                     chunk_x, chunk_z = int(block_x//CHUNK_SIZE), int(block_z//CHUNK_SIZE)
-                    if (chunk_x, chunk_z) in LOADED_CHUNKS:
-                        chunk = LOADED_CHUNKS[(chunk_x, chunk_z)]
+                    if (chunk_x, chunk_z) in state.LOADED_CHUNKS:
+                        chunk = state.LOADED_CHUNKS[(chunk_x, chunk_z)]
                         in_x, in_z = int(block_x % CHUNK_SIZE), int(block_z % CHUNK_SIZE)
                         if 0 <= in_x < CHUNK_SIZE and 0 <= block_y < Y_MAX and 0 <= in_z < CHUNK_SIZE:
                             block_id = chunk.blocks[in_x][block_y][in_z]
@@ -1245,7 +1219,7 @@ def start_game_loop(screen, player, game_mode, fullscreen):
                                 play_sound("dig")
                                 drop_id = BLOCK_TYPES[block_id]["drop"]
                                 if drop_id != 0:
-                                    DROPS.append(DropItem(block_x, block_z, drop_id))
+                                    state.DROPS.append(DropItem(block_x, block_z, drop_id))
                 elif event.button == 3:  # 右键
                     if player.workbench_open:
                         if player.handle_workbench_click(event.pos):
@@ -1261,8 +1235,8 @@ def start_game_loop(screen, player, game_mode, fullscreen):
                         target_block = get_mouse_block(mouse_pos, player)
                         block_x, block_y, block_z = target_block
                         chunk_x, chunk_z = int(block_x//CHUNK_SIZE), int(block_z//CHUNK_SIZE)
-                        if (chunk_x, chunk_z) in LOADED_CHUNKS:
-                            chunk = LOADED_CHUNKS[(chunk_x, chunk_z)]
+                        if (chunk_x, chunk_z) in state.LOADED_CHUNKS:
+                            chunk = state.LOADED_CHUNKS[(chunk_x, chunk_z)]
                             in_x, in_z = int(block_x % CHUNK_SIZE), int(block_z % CHUNK_SIZE)
                             if 0 <= in_x < CHUNK_SIZE and 0 <= block_y < Y_MAX and 0 <= in_z < CHUNK_SIZE:
                                 if chunk.blocks[in_x][block_y][in_z] == 0:
@@ -1282,31 +1256,31 @@ def start_game_loop(screen, player, game_mode, fullscreen):
 
         current_time = (current_time + 1) % DAY_DURATION
         if current_time == 0:
-            is_day = not is_day
+            state.is_day = not state.is_day
 
-        if not is_day:
+        if not state.is_day:
             monster_spawn_timer = (monster_spawn_timer + 1) % monster_spawn_interval
-            if monster_spawn_timer == 0 and len(MONSTERS) < 5:
+            if monster_spawn_timer == 0 and len(state.MONSTERS) < 5:
                 spawn_x = player.world_x + random.randint(-10, 10)
                 spawn_z = player.world_z + random.randint(-10, 10)
-                MONSTERS.append(Monster(spawn_x, spawn_z))
+                state.MONSTERS.append(Monster(spawn_x, spawn_z))
 
         load_chunks_around_player(player)
-        player.update(LOADED_CHUNKS)
+        player.update(state.LOADED_CHUNKS)
 
-        limited_monsters = limit_updates_per_frame(MONSTERS)
+        limited_monsters = limit_updates_per_frame(state.MONSTERS)
         new_monsters = []
         for m in limited_monsters:
-            if m.update(player, LOADED_CHUNKS):
+            if m.update(player, state.LOADED_CHUNKS):
                 new_monsters.append(m)
-        MONSTERS = new_monsters
+        state.MONSTERS = new_monsters
 
-        limited_drops = limit_updates_per_frame(DROPS)
+        limited_drops = limit_updates_per_frame(state.DROPS)
         new_drops = []
         for d in limited_drops:
-            if d.update(LOADED_CHUNKS):
+            if d.update(state.LOADED_CHUNKS):
                 new_drops.append(d)
-        DROPS = new_drops
+        state.DROPS = new_drops
 
         # 网络发送玩家更新
         if (IS_CLIENT or IS_SERVER) and time.time() - last_send_time > SEND_INTERVAL:
@@ -1319,9 +1293,9 @@ def start_game_loop(screen, player, game_mode, fullscreen):
             net_manager.send_message(move_msg)
 
         target_surface = buffer_surface if USE_DOUBLE_BUFFER else screen
-        target_surface.fill((255,255,255) if is_day else (10, 10, 30))
+        target_surface.fill((255,255,255) if state.is_day else (10, 10, 30))
 
-        draw_infinite_map(target_surface, LOADED_CHUNKS, player)
+        draw_infinite_map(target_surface, state.LOADED_CHUNKS, player)
 
         # 绘制其他玩家
         for pid, pos in PLAYERS.items():
@@ -1333,18 +1307,18 @@ def start_game_loop(screen, player, game_mode, fullscreen):
                     continue
                 other_player_rect = pygame.Rect(screen_x, screen_y, BLOCK_SIZE//2, BLOCK_SIZE)
                 pygame.draw.rect(target_surface, PURPLE, other_player_rect)
-                name_text = small_font.render(pid, True, WHITE)
+                name_text = state.small_font.render(pid, True, WHITE)
                 target_surface.blit(name_text, (screen_x - 10, screen_y - 20))
 
-        for drop in DROPS:
+        for drop in state.DROPS:
             drop.draw(target_surface, player)
-        for monster in MONSTERS:
+        for monster in state.MONSTERS:
             monster.draw(target_surface, player)
 
         player.draw(target_surface)
         draw_virtual_controls(target_surface)
 
-        selected_surf = small_font.render(f"选中方块：{BLOCK_TYPES[selected_block]['name']}", True, WHITE)
+        selected_surf = state.small_font.render(f"选中方块：{BLOCK_TYPES[selected_block]['name']}", True, WHITE)
         target_surface.blit(selected_surf, (10, 30))
 
         hp_bar_x = SCREEN_WIDTH - 110
@@ -1352,18 +1326,18 @@ def start_game_loop(screen, player, game_mode, fullscreen):
         pygame.draw.rect(target_surface, BLACK, (hp_bar_x, hp_bar_y, 100, 8))
         hp_fill = int(player.hp)
         pygame.draw.rect(target_surface, RED, (hp_bar_x, hp_bar_y, hp_fill, 8))
-        hp_text = small_font.render("HP", True, WHITE)
+        hp_text = state.small_font.render("HP", True, WHITE)
         target_surface.blit(hp_text, (hp_bar_x - 30, hp_bar_y - 2))
 
         if player.hp <= 20:
-            warning_text = small_font.render("警告：生命值过低!", True, RED)
+            warning_text = state.small_font.render("警告：生命值过低!", True, RED)
             target_surface.blit(warning_text, (SCREEN_WIDTH//2 - warning_text.get_width()//2, 40))
 
-        mode_text = small_font.render(f"模式: {game_mode}", True, WHITE)
+        mode_text = state.small_font.render(f"模式: {game_mode}", True, WHITE)
         target_surface.blit(mode_text, (10, 10))
 
         if game_mode == "multiplayer":
-            player_count = small_font.render(f"玩家: {len(PLAYERS) + 1}", True, WHITE)
+            player_count = state.small_font.render(f"玩家: {len(PLAYERS) + 1}", True, WHITE)
             target_surface.blit(player_count, (SCREEN_WIDTH - 150, 30))
 
         if USE_DOUBLE_BUFFER:
@@ -1373,7 +1347,7 @@ def start_game_loop(screen, player, game_mode, fullscreen):
 
 # ---------------------- 主函数 ----------------------
 def main():
-    global menu_bg, main_font, small_font, IS_MOBILE, game_logger
+    global IS_MOBILE
 
     try:
         # 移动设备检测
@@ -1392,19 +1366,19 @@ def main():
 
         # 加载字体
         try:
-            main_font = pygame.font.Font(FONT_PATH, 48)
-            small_font = pygame.font.Font(FONT_PATH, 24)
+            state.main_font = pygame.font.Font(FONT_PATH, 48)
+            state.small_font = pygame.font.Font(FONT_PATH, 24)
         except Exception:
-            main_font = pygame.font.Font(None, 48)
-            small_font = pygame.font.Font(None, 24)
+            state.main_font = pygame.font.Font(None, 48)
+            state.small_font = pygame.font.Font(None, 24)
 
         # 初始化日志
         try:
-            game_logger = GameLogger(LOG_DIR, enabled=True)
-            game_logger.info("日誌系統初始化成功")
+            state.game_logger = GameLogger(LOG_DIR, enabled=True)
+            state.game_logger.info("日誌系統初始化成功")
         except Exception as e:
             print(f"日志系统初始化失败: {e}")
-            game_logger = None
+            state.game_logger = None
 
         # 加载设置
         load_settings()
@@ -1412,23 +1386,23 @@ def main():
         # 加载背景图
         try:
             if os.path.exists(BG_PHOTO_PATH):
-                menu_bg = pygame.image.load(BG_PHOTO_PATH).convert()
-                menu_bg = pygame.transform.scale(menu_bg, (SCREEN_WIDTH, SCREEN_HEIGHT))
+                state.menu_bg = pygame.image.load(BG_PHOTO_PATH).convert()
+                state.menu_bg = pygame.transform.scale(state.menu_bg, (SCREEN_WIDTH, SCREEN_HEIGHT))
                 log(f"背景图加载成功：{BG_PHOTO_PATH}")
             else:
-                menu_bg = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-                menu_bg.fill(BROWN)
+                state.menu_bg = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+                state.menu_bg.fill(BROWN)
                 log(f"背景图不存在，使用棕色背景：{BG_PHOTO_PATH}")
         except Exception as e:
-            menu_bg = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-            menu_bg.fill(BROWN)
+            state.menu_bg = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            state.menu_bg.fill(BROWN)
             log(f"背景图加载失败：{str(e)}，使用棕色背景")
 
         # 初始化音效与音乐
         init_sounds()
         play_random_ogg_music(prefix="menu")
 
-        print("Copyright (c) LongTeam Studio, all rights reserved.")
+        print("Copyright (c) LongTeam-Studio, all rights reserved.")
         print("如有发现盗版，必会追究责任")
         print("QQ群:131293550，只是玩家交流群")
 
@@ -1436,22 +1410,17 @@ def main():
         return_to_main_menu(screen)
 
     except KeyboardInterrupt:
-        if game_logger:
-            game_logger.info("用户通过键盘中断退出游戏")
+        if state.game_logger:
+            state.game_logger.info("用户通过键盘中断退出游戏")
         pygame.quit()
-        if game_logger:
-            game_logger.close()
+        if state.game_logger:
+            state.game_logger.close()
         sys.exit(0)
     except Exception as e:
-        if game_logger:
-            game_logger.fatal("游戏运行时发生致命错误")
-            game_logger.exception("错误详情", e)
-            game_logger.exit("游戏异常退出", exit_code=-1)
-        else:
-            print(f"[FATAL] 游戏运行时发生致命错误: {e}")
-            traceback.print_exc()
-        pygame.quit()
-        sys.exit(-1)
+        import traceback
+        with open("CRASH_DEBUG.txt", "w", encoding="utf-8") as f:
+            traceback.print_exc(file=f)
+        raise e
 
 
 if __name__ == "__main__":
